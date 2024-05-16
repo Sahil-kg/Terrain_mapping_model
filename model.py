@@ -8,6 +8,7 @@ from PIL import Image
 import os
 from torchsummary import summary
 from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
 
 class UNET(nn.Module):
     def __init__(self):
@@ -102,24 +103,28 @@ class UNET(nn.Module):
 
 def prepo(directory_path):
     preprocessed_images = []
+    filenames=[]
 
     def preprocess_image(image_path, target_size=(512, 512)):
         image = Image.open(image_path)
         image = image.resize(target_size)
         image=image.convert("RGB")
         image = np.array(image)
-    
         return image
+    
     for filename in os.listdir(directory_path):
-        if filename.endswith(".jpg"):  # Filter only image files
+        if filename.endswith(".jpg"):  
             image_path = os.path.join(directory_path, filename)
             preprocessed_image = preprocess_image(image_path)
             preprocessed_images.append(preprocessed_image)
+            filenames.append(filename)
     preprocessed_images=np.array(preprocessed_images)
-    return preprocessed_images
+    return preprocessed_images,filenames
 
-def prepomask(directory_path):
+def prepomask(directory_path,filenames_x_train):
+
     preprocessed_images = []
+    labels = []
 
     def preprocess_image(image_path, target_size=(512, 512)):
         image = Image.open(image_path)
@@ -128,26 +133,24 @@ def prepomask(directory_path):
         image = np.array(image)
         return image
     
-    for filename in os.listdir(directory_path):
-        if filename.endswith(".png"):  # Filter only image files
-            image_path = os.path.join(directory_path, filename)
-                
+    for filename in filenames_x_train:
+        if filename.endswith(".jpg"):  # Filter only image files
+            name,extenson=os.path.splitext(filename)
+            image_path = os.path.join(directory_path, name+'.png')
             preprocessed_image = preprocess_image(image_path)
             preprocessed_images.append(preprocessed_image)
-    preprocessed_images=np.array(preprocessed_images)
-    labels = []
-    print(preprocessed_images.shape)
-    for i in range(preprocessed_images.shape[0]):
-        label = rgb_to_2D_label(preprocessed_images[i])
-        labels.append(label)   
+            label = rgb_to_2D_label(preprocessed_image)
+            labels.append(label) 
+
+    preprocessed_images=np.array(preprocessed_images)  
     labels=np.array(labels)
     labels = np.expand_dims(labels, axis=3)
     return labels
     
 class CustomDataset(Dataset):
     def __init__(self, x_train, y_train):
-        self.x_train=prepo(x_train)
-        self.y_train=prepomask(y_train)
+        self.x_train,self.filenames_x_train=prepo(x_train)
+        self.y_train=prepomask(y_train,self.filenames_x_train)
         self.x_train = torch.from_numpy(self.x_train).permute(0, 3, 1, 2).float()
         self.y_train = torch.from_numpy(self.y_train).permute(0, 3, 1, 2).long()
         self.y_train = torch.squeeze(self.y_train, dim=1)
@@ -159,14 +162,14 @@ class CustomDataset(Dataset):
         return self.x_train[idx], self.y_train[idx]
     
 def train(model,x_train,y_train,criterion,optimizer,epochs):
-
     train_dataset = CustomDataset(x_train, y_train)
     train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
 
     for epoch in range(epochs):
         run_loss = 0.0
 
-        for x_batch, y_batch in train_loader:
+        for x_batch, y_batch in tqdm(train_loader):
+        
             optimizer.zero_grad()
             output = model(x_batch)
             loss = criterion(output, y_batch)
